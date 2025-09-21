@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  schedule:
+    # 每天凌晨 0:05 自动运行
+    - cron: "5 0 * * *"
+  workflow_dispatch:   # 手动运行触发
+    inputs:
+      force_run:
+        description: "是否强制执行提交 (忽略21%休息概率)"
+        required: false
+        default: "false"
+
+jobs:
+  autogreen:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v2
+
+      - name: Auto random commit
+        run: |
+          set -e
+          git config --local user.email "chaoscodes512@outlook.com"
+          git config --local user.name "ChuiShui233"
+          git remote set-url origin https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+          git pull --rebase
+
+          FORCE_RUN="${{ github.event.inputs.force_run }}"
+
+          # 21% 概率不提交 (手动运行时可跳过)
+          if [ "$FORCE_RUN" != "true" ] && [ $((RANDOM % 100)) -lt 21 ]; then
+            echo "今天休息，不提交~"
+            exit 0
+          fi
+
+          # 随机提交次数 (1~23)
+          commit_count=$(( (RANDOM % 23) + 1 ))
+          echo "今天将提交 $commit_count 次"
+
+          # 随机生成 commit 时间 (单位: 分钟，0~1439 分钟)
+          times=()
+          for i in $(seq 1 $commit_count); do
+            times+=($((RANDOM % 1440)))
+          done
+
+          # 排序时间点
+          IFS=$'\n' sorted_times=($(sort -n <<<"${times[*]}"))
+          unset IFS
+
+          for idx in "${!sorted_times[@]}"; do
+            target_minute=${sorted_times[$idx]}
+            target_time=$(( $(date -d "$(date +%F) 00:00:00" +%s) + target_minute * 60 ))
+
+            now=$(date +%s)
+            wait_sec=$(( target_time - now ))
+            if [ $wait_sec -gt 0 ]; then
+              echo "等待 $wait_sec 秒，到第 $((idx+1)) 个提交时间..."
+              sleep $wait_sec
+            fi
+
+            git commit --allow-empty -m "Auto commit #$((idx+1)) - keep green"
+            git push
+          done
